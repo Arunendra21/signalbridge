@@ -3,10 +3,20 @@
 
     <!-- Bluetooth: discovery + connection. No INTERNET permission on purpose:
          SignalBridge moves voice over local radio only, never over mobile data. -->
+
+    <!-- Android 12+ (API 31+) runtime Bluetooth permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Android 10-11 (API 29-30) legacy Bluetooth perms + FINE_LOCATION, which those
+         versions REQUIRE for BLE scanning to return any results. Capped so newer
+         versions use the runtime perms above instead. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
 
     <!-- Microphone for voice capture -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

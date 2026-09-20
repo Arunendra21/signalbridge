@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.signalbridge"
-        minSdk = 26          // Android 8.0 — needed for BLE + modern Bluetooth APIs
+        minSdk = 29          // Android 10 — required for Bluetooth LE L2CAP CoC voice transport
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"

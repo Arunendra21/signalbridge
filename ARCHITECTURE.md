@@ -27,10 +27,11 @@ Therefore the only thing you can legitimately borrow from a nearby person **with
 - **Seeker** scans for that UUID (`BleScanner`) and ranks results by RSSI so the nearest helper surfaces first.
 - No data, no location, no server.
 
-### Layer 2 — Voice link (Bluetooth RFCOMM + PCM)
-- Once a helper is chosen, the two phones open a **classic Bluetooth RFCOMM socket** (`BluetoothVoiceLink`). Helper hosts, Seeker connects.
-- `VoiceStreamer` captures 16 kHz/16-bit mono PCM from the mic and writes 20 ms frames to the socket; simultaneously reads the peer's frames and plays them. Full-duplex intercom.
-- This is a raw socket we own — **not** the internet. This layer is complete and works today.
+### Layer 2 — Voice link (Bluetooth LE L2CAP + PCM)
+- Discovery and transport both stay on **Bluetooth LE**, so the device the Seeker scans is exactly the one it connects to — no classic-Bluetooth pairing, no random-vs-real MAC mismatch. The Helper opens an **L2CAP connection-oriented channel** (`listenUsingInsecureL2capChannel`) and advertises its **PSM** in the BLE manufacturer data; the Seeker reads that PSM and connects (`createInsecureL2capChannel`). See `BluetoothVoiceLink`.
+- A one-byte **consent handshake** gates audio: the Helper sends `CTRL_GO` only after the user approves; the Seeker blocks on `awaitGo()` until then (or ends if the Helper declines/disconnects).
+- `VoiceStreamer` captures 16 kHz/16-bit mono PCM from the mic and writes 20 ms frames to the channel; simultaneously reads the peer's frames and plays them. Full-duplex intercom.
+- This is a raw LE channel we own — **not** the internet. This layer is complete and works today (Android 10+).
 
 ### Layer 3 — Cellular routing (EXPERIMENTAL)
 Getting the Seeker's voice *out over the Helper's tower to a real number* is the frontier. Three approaches, none finished, ranked by promise:

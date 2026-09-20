@@ -1,13 +1,14 @@
 package com.signalbridge.session
 
-import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.os.Build
 import com.signalbridge.audio.VoiceStreamer
 import com.signalbridge.ble.BleAdvertiser
 import com.signalbridge.ble.BleScanner
 import com.signalbridge.bt.BluetoothVoiceLink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,12 +18,12 @@ import kotlinx.coroutines.launch
 enum class Role { IDLE, HELPER, SEEKER }
 
 /** High-level state the UI renders. */
-enum class LinkState { IDLE, ADVERTISING, SCANNING, CONNECTING, CONSENT_PENDING, LIVE, ENDED }
+enum class LinkState { IDLE, ADVERTISING, SCANNING, CONNECTING, CONSENT_PENDING, WAITING_APPROVAL, LIVE, ENDED }
 
 /**
- * The brain. Ties discovery (BLE) -> pairing (RFCOMM) -> voice (audio) together and
- * exposes a single observable state to the UI. Deliberately a plain object so both the
- * Activity and the foreground service share one source of truth.
+ * The brain. Ties discovery (BLE) -> transport (L2CAP) -> voice (audio) together and
+ * exposes a single observable state to the UI. A plain singleton so the Activity and the
+ * foreground service share one source of truth.
  */
 class SessionManager(private val appContext: Context) {
 
@@ -37,71 +38,83 @@ class SessionManager(private val appContext: Context) {
     private val _helpers = MutableStateFlow<List<BleScanner.NearbyHelper>>(emptyList())
     val helpers: StateFlow<List<BleScanner.NearbyHelper>> = _helpers.asStateFlow()
 
-    /** Seconds the current live link has been up — the meter that drives settlement. */
     private val _seconds = MutableStateFlow(0)
     val seconds: StateFlow<Int> = _seconds.asStateFlow()
 
     private val advertiser by lazy { BleAdvertiser(appContext) }
     private val scanner by lazy { BleScanner(appContext) }
-    private val link by lazy { BluetoothVoiceLink(appContext) }
+    private var link: BluetoothVoiceLink? = null
     private var streamer: VoiceStreamer? = null
+
+    private val myName: String get() = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
 
     // ---------------- Helper flow ----------------
 
-    /** Helper taps "I can help": start beaconing and wait for a Seeker to connect. */
+    /** Helper taps "I can help": open an L2CAP server, advertise its PSM, wait for a Seeker. */
     fun becomeHelper() {
         _role.value = Role.HELPER
+        val l = BluetoothVoiceLink(appContext).also { link = it }
+        val psm = l.hostAndListen()
+        if (psm == null) { _state.value = LinkState.ENDED; return }
+        advertiser.start(psm, myName)
         _state.value = LinkState.ADVERTISING
-        advertiser.start()
         scope.launch {
-            if (link.hostAndAccept()) {
-                // A Seeker connected. Helper must explicitly approve before audio flows.
-                _state.value = LinkState.CONSENT_PENDING
+            if (l.accept()) {
+                advertiser.stop()                 // stop broadcasting once someone connects
+                _state.value = LinkState.CONSENT_PENDING   // wait for the user to approve
             } else {
                 _state.value = LinkState.ENDED
             }
         }
     }
 
-    /** Helper approves the request — only now does voice actually start. */
-    fun helperApprove() = goLive()
+    /** Helper approves: tell the Seeker to start, then both go live. */
+    fun helperApprove() {
+        scope.launch {
+            if (link?.sendGo() == true) goLive() else _state.value = LinkState.ENDED
+        }
+    }
+
+    /** Helper declines: close the link (Seeker sees the disconnect and ends). */
+    fun helperDecline() = end()
 
     // ---------------- Seeker flow ----------------
 
     /** Seeker taps "I need to call": scan for nearby helpers. */
     fun becomeSeeker() {
         _role.value = Role.SEEKER
+        _helpers.value = emptyList()
         _state.value = LinkState.SCANNING
-        val found = mutableMapOf<String, BleScanner.NearbyHelper>()
+        val found = LinkedHashMap<String, BleScanner.NearbyHelper>()
         scanner.start { h ->
-            found[h.device.address] = h
-            _helpers.value = found.values.sortedByDescending { it.rssi } // nearest first
+            found[h.device.address] = h                       // refresh RSSI per device
+            _helpers.value = found.values.sortedByDescending { it.rssi }
         }
     }
 
-    /** Seeker picks a helper from the list and connects. */
+    /** Seeker picks a helper and connects, then waits for the helper to approve. */
     fun connectToHelper(helper: BleScanner.NearbyHelper) {
         scanner.stop()
         _state.value = LinkState.CONNECTING
+        val l = BluetoothVoiceLink(appContext).also { link = it }
         scope.launch {
-            if (link.connectTo(helper.device)) {
-                goLive()
-            } else {
-                _state.value = LinkState.ENDED
-            }
+            if (!l.connectTo(helper.device, helper.psm)) { _state.value = LinkState.ENDED; return@launch }
+            _state.value = LinkState.WAITING_APPROVAL
+            if (l.awaitGo()) goLive() else _state.value = LinkState.ENDED
         }
     }
 
     // ---------------- Shared ----------------
 
     private fun goLive() {
-        val i = link.input; val o = link.output
+        val l = link ?: run { _state.value = LinkState.ENDED; return }
+        val i = l.input; val o = l.output
         if (i == null || o == null) { _state.value = LinkState.ENDED; return }
         streamer = VoiceStreamer(i, o).also { it.start() }
         _state.value = LinkState.LIVE
         scope.launch {
             while (_state.value == LinkState.LIVE) {
-                kotlinx.coroutines.delay(1000)
+                delay(1000)
                 _seconds.value += 1
             }
         }
@@ -110,7 +123,7 @@ class SessionManager(private val appContext: Context) {
     fun end() {
         advertiser.stop(); scanner.stop()
         streamer?.stop(); streamer = null
-        link.close()
+        link?.close(); link = null
         _state.value = LinkState.ENDED
     }
 

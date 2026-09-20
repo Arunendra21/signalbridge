@@ -13,7 +13,7 @@ You're standing somewhere your SIM has no bars, but someone next to you does. Si
 | Capability | Status | Notes |
 |---|---|---|
 | Discover a nearby helper (BLE) | ✅ Works | No data — a Bluetooth beacon. |
-| Open a two-way voice link between the two phones | ✅ Works | Voice streams over a Bluetooth RFCOMM socket. Zero mobile data. |
+| Open a two-way voice link between the two phones | ✅ Works | Voice streams over a Bluetooth LE L2CAP channel. Zero mobile data. |
 | Explicit consent + on/off control for the helper | ✅ Works | Helper must approve before any audio flows. |
 | Meter airtime + settle via UPI | ✅ Works | Payment is out-of-band in the user's own UPI app. |
 | Route the call out to **any phone number** over the helper's tower | ⚠️ Experimental | Blocked by Android's closed in-call audio path. Approaches documented in code. |
@@ -21,7 +21,7 @@ You're standing somewhere your SIM has no bars, but someone next to you does. Si
 
 ## Why "no data"?
 
-The app declares **no `INTERNET` permission**. Voice travels as raw PCM over a Bluetooth RFCOMM socket — a local radio link on the 2.4 GHz band, not a network connection. Discovery is a BLE advertisement. Payment happens after the call in a separate UPI app. Nothing here consumes a mobile-data plan.
+The app declares **no `INTERNET` permission**. Voice travels as raw PCM over a Bluetooth LE **L2CAP** channel — a local radio link on the 2.4 GHz band, not a network connection. Discovery is a BLE advertisement (the helper's PSM + name ride in it). Payment happens after the call in a separate UPI app. Nothing here consumes a mobile-data plan.
 
 ## How it works (30-second version)
 
@@ -31,8 +31,8 @@ The app declares **no `INTERNET` permission**. Voice travels as raw PCM over a B
   ┌──────────┐    BLE advertise        ┌──────────┐
   │  scan  ◄─┼─────────────────────────┤ advertise│   1. discovery (no data)
   │          │                         │          │
-  │  mic ────┼──► RFCOMM voice socket ─┼──► spkr   │   2. voice link (no data)
-  │  spkr ◄──┼──── RFCOMM voice socket ┼──── mic   │      full-duplex intercom
+  │  mic ────┼──► LE L2CAP voice chan ─┼──► spkr   │   2. voice link (no data)
+  │  spkr ◄──┼──── LE L2CAP voice chan ┼──── mic   │      full-duplex intercom
   └──────────┘                         └────┬─────┘
                                             │  (experimental) route into a
                                             ▼  real cellular voice call
@@ -48,7 +48,7 @@ Full technical write-up: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 3. On your Android phone: enable *Install unknown apps* for your browser, then open the APK.
 4. Install it on **two** Android phones (one Seeker, one Helper) and grant Bluetooth + microphone permissions.
 
-> Requires Android 8.0+. It's a debug-signed build for testing — not yet a Play Store release.
+> Requires Android 10+ (uses Bluetooth LE L2CAP). It's a debug-signed build for testing — not yet a Play Store release.
 
 ## Build it yourself
 
