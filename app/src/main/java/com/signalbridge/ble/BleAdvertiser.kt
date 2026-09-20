@@ -23,8 +23,8 @@ class BleAdvertiser(private val context: Context) {
     }
 
     private val callback = object : AdvertiseCallback() {
-        override fun onStartFailure(errorCode: Int) = Log.w(TAG, "advertise failed: $errorCode")
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) = Log.i(TAG, "advertising")
+        override fun onStartFailure(errorCode: Int) { Log.w(TAG, "advertise failed: $errorCode") }
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) { Log.i(TAG, "advertising") }
     }
 
     /**

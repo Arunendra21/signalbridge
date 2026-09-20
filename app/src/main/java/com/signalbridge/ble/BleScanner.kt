@@ -55,7 +55,7 @@ class BleScanner(private val context: Context) {
                 onFound(NearbyHelper(result.device, result.rssi, name, psm))
             }
 
-            override fun onScanFailed(errorCode: Int) = Log.w(TAG, "scan failed: $errorCode")
+            override fun onScanFailed(errorCode: Int) { Log.w(TAG, "scan failed: $errorCode") }
         }
         s.startScan(filters, settings, cb)
     }
