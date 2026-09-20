@@ -37,7 +37,8 @@ Getting the Seeker's voice *out over the Helper's tower to a real number* is the
 
 **A. Bluetooth Hands-Free (HFP) emulation — best data-free path.**
 Make the Seeker's phone present to the Helper's phone as a Bluetooth headset (HFP "HF" role). When the Helper places a normal voice call, the OS routes the call audio to the "headset" (the Seeker). No data — it's the Helper's voice minutes.
-*Blocker:* Android exposes the Audio Gateway (AG) role to apps, not the HF role. The HF side must be implemented by hand over RFCOMM + SCO, which is device-dependent. **This is the #1 open problem — see `CellularBridge.kt`.**
+*Progress:* the HF-side **Service Level Connection handshake** (the AT-command control channel a headset speaks to the phone) is implemented and unit-tested in [`hfp/HfpAtCommands.kt`](app/src/main/java/com/signalbridge/hfp/HfpAtCommands.kt) and wired to a real RFCOMM socket in [`hfp/HfpHandsFreeUnit.kt`](app/src/main/java/com/signalbridge/hfp/HfpHandsFreeUnit.kt).
+*Remaining blocker:* the **SCO/eSCO audio link** that actually carries the call PCM is not exposed to apps on the HF side of stock Android. That, plus AGs that refuse incoming HF connections, is the open problem. **This is the #1 task — see `CellularBridge.kt` and CONTRIBUTING.md.**
 
 **B. Self-managed Telecom (`ConnectionService`).**
 SignalBridge owns a call object via `TelecomManager`. Clean for **app-to-app** SignalBridge calls, but cannot terminate onto the public phone network without a **licensed carrier gateway** (Exotel/Twilio-India), which reintroduces data + licensing.

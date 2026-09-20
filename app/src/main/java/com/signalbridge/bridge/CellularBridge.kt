@@ -48,7 +48,9 @@ object CellularBridge {
 
     val roadmap = listOf(
         Feasibility(Approach.HFP_EMULATION, worksToday = false,
-            "Most promising for real PSTN calls with no data. Needs hand-rolled HFP-HF over RFCOMM/SCO; device-dependent."),
+            "IN PROGRESS: the HF-side Service Level Connection handshake is implemented and " +
+            "unit-tested (see hfp/HfpAtCommands.kt + HfpHandsFreeUnit.kt). Remaining blocker: " +
+            "HF-side SCO audio is not exposed to apps on stock Android."),
         Feasibility(Approach.SELF_MANAGED_TELECOM, worksToday = false,
             "Clean for app-to-app; cannot reach real phone numbers without a licensed carrier gateway."),
         Feasibility(Approach.PROSE_SIDELINK, worksToday = false,

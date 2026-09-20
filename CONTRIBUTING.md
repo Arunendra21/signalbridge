@@ -3,7 +3,7 @@
 Thanks for helping. This project is honest about what's hard — contributions that move the frontier are the most welcome.
 
 ## Open problems, ranked
-1. **HFP-HF emulation** (`app/src/main/java/com/signalbridge/bridge/CellularBridge.kt`) — prove data-free routing of the Bluetooth voice link into the Helper's real cellular call on ≥2 real Android models. This is the headline feature.
+1. **HFP-HF emulation** — the headline feature. **Done:** the SLC AT-command handshake (`hfp/HfpAtCommands.kt`, unit-tested) and its RFCOMM wiring (`hfp/HfpHandsFreeUnit.kt`). **Next:** establish the HF-side **SCO/eSCO audio link** to actually read/write the call PCM, and test against real Audio Gateways on ≥2 phone models. See `bridge/CellularBridge.kt`.
 2. **Codec** — swap raw PCM for Opus to cut Bluetooth bandwidth and improve quality on weak links (`audio/VoiceStreamer.kt`).
 3. **Robust discovery** — reconnection, multiple helpers, pairing security (`ble/`).
 4. **Reputation & abuse limits** — needed before any cellular path ships (`session/`).
