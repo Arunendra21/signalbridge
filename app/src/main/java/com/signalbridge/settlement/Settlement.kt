@@ -3,13 +3,16 @@ package com.signalbridge.settlement
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.signalbridge.transport.Handshake
 
 /**
- * The Seeker compensates the Helper for the airtime they lent. Payment is completely
- * out-of-band (a UPI deep link the user confirms in their own bank/UPI app) — it never
- * touches the voice link and needs no data during the call itself.
+ * The Seeker compensates the Helper for the airtime they lent. Payment is out-of-band: a
+ * UPI deep link the user confirms in their own bank/UPI app — SignalBridge never handles
+ * money and needs no data for it.
  *
- * Rate is deliberately tiny and transparent. Tune to taste.
+ * The payee UPI id is the Helper's REAL id, delivered over the consent handshake
+ * ([Handshake]) — no more hard-coded placeholder. If the Helper never set one, the UI asks
+ * the Seeker to type it before paying.
  */
 object Settlement {
 
@@ -20,11 +23,14 @@ object Settlement {
         return (minutes * PAISE_PER_MINUTE) / 100.0
     }
 
+    fun isValidPayee(vpa: String?): Boolean = Handshake.looksLikeUpi(vpa)
+
     /**
-     * Launches the user's UPI app pre-filled to pay the Helper. The user still taps
-     * "Pay" themselves inside their bank app — SignalBridge never handles money directly.
+     * Launches the user's UPI app pre-filled to pay the Helper's real id. Returns false if
+     * the payee id is missing/invalid so the caller can prompt for it instead of guessing.
      */
-    fun launchUpi(context: Context, payeeVpa: String, payeeName: String, seconds: Int) {
+    fun launchUpi(context: Context, payeeVpa: String?, payeeName: String, seconds: Int): Boolean {
+        if (!isValidPayee(payeeVpa)) return false
         val amount = amountRupees(seconds)
         val uri = Uri.parse(
             "upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}" +
@@ -32,5 +38,6 @@ object Settlement {
         )
         val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(Intent.createChooser(intent, "Pay the helper"))
+        return true
     }
 }

@@ -25,8 +25,10 @@ object Protocol {
     /** Fallback name shown for a helper if it didn't advertise one. */
     const val DEFAULT_HELPER_NAME = "Nearby helper"
 
-    // ---- Consent handshake bytes sent over the voice channel before audio ----
-    const val CTRL_GO: Byte = 'G'.code.toByte()   // Helper approved — start talking
+    // ---- Wi-Fi Direct (long-range) transport ----
+    const val WIFI_SERVICE_INSTANCE = "signalbridge"
+    const val WIFI_SERVICE_TYPE = "_signalbridge._tcp"
+    const val WIFI_TCP_PORT = 8917               // local-only port inside the Wi-Fi Direct group
 
     // ---- Audio format (must match on both ends) ----
     const val SAMPLE_RATE_HZ = 16_000        // wideband voice, cheap on radio

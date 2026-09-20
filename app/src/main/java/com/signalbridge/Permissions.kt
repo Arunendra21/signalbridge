@@ -8,21 +8,25 @@ import androidx.core.content.ContextCompat
 
 /**
  * The runtime permissions SignalBridge needs differ by Android version — this is the #1
- * reason BLE scanning silently returns nothing if you get it wrong:
- *   - Android 12+ (API 31+): the new BLUETOOTH_SCAN / ADVERTISE / CONNECT runtime perms.
- *   - Android 10-11 (API 29-30): ACCESS_FINE_LOCATION is REQUIRED for scans to work.
+ * reason discovery silently returns nothing if you get it wrong:
+ *   - Bluetooth scan: BLUETOOTH_SCAN/ADVERTISE/CONNECT on 12+; FINE_LOCATION on 10-11.
+ *   - Wi-Fi Direct discovery: NEARBY_WIFI_DEVICES on 13+; FINE_LOCATION on 10-12.
  * RECORD_AUDIO is always needed for voice.
  */
 object Permissions {
 
     fun required(): Array<String> = buildList {
         add(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {          // 31+
             add(Manifest.permission.BLUETOOTH_SCAN)
             add(Manifest.permission.BLUETOOTH_ADVERTISE)
             add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {   // 33+
+            add(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {
-            // API 29-30: scanning is gated on fine location.
+            // Covers BLE scan (<31) and Wi-Fi Direct discovery (<33).
             add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
     }.toTypedArray()

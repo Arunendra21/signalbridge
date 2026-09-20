@@ -19,7 +19,8 @@ import kotlin.concurrent.thread
  *   - Playback thread: [in] (from the other phone) -> speaker
  *
  * This is a full-duplex local intercom. It works with zero mobile data because the
- * transport ([in]/[out]) is a Bluetooth RFCOMM socket, not a network connection.
+ * transport ([in]/[out]) is a local radio channel — Bluetooth LE L2CAP or Wi-Fi Direct —
+ * not a connection to the internet.
  */
 class VoiceStreamer(
     private val input: InputStream,

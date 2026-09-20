@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.signalbridge.session.LinkState
+import com.signalbridge.session.RangeMode
 import com.signalbridge.session.Role
 import com.signalbridge.session.SessionManager
 import com.signalbridge.session.VoiceLinkService
@@ -27,13 +28,11 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var session: SessionManager
 
-    // Live UI signals for readiness — recomputed on every resume so reopening the app
-    // always reflects the CURRENT state of permissions and the Bluetooth radio.
     private val permsGranted = mutableStateOf(false)
     private val btEnabled = mutableStateOf(false)
 
-    /** Role the user asked for, held while we satisfy permissions / turn Bluetooth on. */
     private var pendingRole: Role? = null
+    private var pendingUpi: String? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -60,13 +59,14 @@ class MainActivity : ComponentActivity() {
                         session = session,
                         permsGranted = permsGranted.value,
                         btEnabled = btEnabled.value,
-                        onStartRole = ::gateAndRun,
+                        onStartSeeker = { gateAndRun(Role.SEEKER, null) },
+                        onStartHelper = { upi -> gateAndRun(Role.HELPER, upi) },
                         onFixPermissions = { ensurePermissions() },
                         onEnableBt = { ensureBluetooth() },
                         onGoLive = { VoiceLinkService.start(this) },
                         onEnd = { VoiceLinkService.stop(this) },
-                        onPay = { secs ->
-                            Settlement.launchUpi(this, "helper@upi", "SignalBridge Helper", secs)
+                        onPay = { payee, secs ->
+                            Settlement.launchUpi(this, payee, "SignalBridge Helper", secs)
                         },
                     )
                 }
@@ -76,20 +76,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // The user may have toggled permissions or Bluetooth in Settings while away.
         permsGranted.value = Permissions.allGranted(this)
         btEnabled.value = isBtOn()
     }
 
     // ---------------- Readiness gate ----------------
 
-    /** Entry point when the user taps a role: satisfy permissions + Bluetooth, then start. */
-    private fun gateAndRun(role: Role) {
-        pendingRole = role
+    private fun gateAndRun(role: Role, upi: String?) {
+        pendingRole = role; pendingUpi = upi
         continueGate()
     }
 
-    /** Advances through the checklist; each launcher callback calls back into here. */
     private fun continueGate() {
         val role = pendingRole ?: return
         when {
@@ -111,7 +108,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRole(role: Role) = when (role) {
-        Role.HELPER -> session.becomeHelper()
+        Role.HELPER -> session.becomeHelper(pendingUpi)
         Role.SEEKER -> session.becomeSeeker()
         Role.IDLE -> Unit
     }
@@ -125,17 +122,22 @@ private fun HomeScreen(
     session: SessionManager,
     permsGranted: Boolean,
     btEnabled: Boolean,
-    onStartRole: (Role) -> Unit,
+    onStartSeeker: () -> Unit,
+    onStartHelper: (String?) -> Unit,
     onFixPermissions: () -> Unit,
     onEnableBt: () -> Unit,
     onGoLive: () -> Unit,
     onEnd: () -> Unit,
-    onPay: (Int) -> Unit,
+    onPay: (String?, Int) -> Boolean,
 ) {
+    val mode by session.mode.collectAsState()
     val role by session.role.collectAsState()
     val state by session.state.collectAsState()
     val helpers by session.helpers.collectAsState()
     val seconds by session.seconds.collectAsState()
+    val payee by session.payeeUpi.collectAsState()
+
+    var showHelperUpiDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) { if (state == LinkState.LIVE) onGoLive() }
 
@@ -144,92 +146,152 @@ private fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("SignalBridge", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Borrow a nearby signal for an urgent call — over Bluetooth, no mobile data.", fontSize = 14.sp)
+        Text("Borrow a nearby signal for an urgent call — no mobile data.", fontSize = 14.sp)
         Spacer(Modifier.height(16.dp))
 
-        // Readiness banner — always visible while idle so the user knows what's missing.
         if (role == Role.IDLE) {
+            // Range mode picker.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = mode == RangeMode.BLUETOOTH,
+                    onClick = { session.setMode(RangeMode.BLUETOOTH) },
+                    label = { Text("Bluetooth · ~20 m") },
+                )
+                FilterChip(
+                    selected = mode == RangeMode.WIFI,
+                    onClick = { session.setMode(RangeMode.WIFI) },
+                    label = { Text("Wi-Fi · ~150 m (beta)") },
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+
             if (!permsGranted) StatusCard(
-                "Permissions needed", "SignalBridge needs Bluetooth + microphone access.",
+                "Permissions needed", "SignalBridge needs Bluetooth/Wi-Fi + microphone access.",
                 "Grant permissions", onFixPermissions
             )
             if (permsGranted && !btEnabled) StatusCard(
                 "Bluetooth is off", "Turn on Bluetooth to find or offer a signal.",
                 "Turn on Bluetooth", onEnableBt
             )
-        }
 
-        when {
-            role == Role.IDLE -> {
-                Spacer(Modifier.height(8.dp))
-                Button({ onStartRole(Role.SEEKER) }, Modifier.fillMaxWidth()) {
-                    Text("I need to make a call")
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton({ onStartRole(Role.HELPER) }, Modifier.fillMaxWidth()) {
-                    Text("I can help (share my signal)")
-                }
+            Spacer(Modifier.height(8.dp))
+            Button(onStartSeeker, Modifier.fillMaxWidth()) { Text("I need to make a call") }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton({ showHelperUpiDialog = true }, Modifier.fillMaxWidth()) {
+                Text("I can help (share my signal)")
             }
-
-            role == Role.SEEKER && state == LinkState.SCANNING -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Looking for nearby helpers…", fontWeight = FontWeight.Medium)
-                }
-                Spacer(Modifier.height(12.dp))
-                if (helpers.isEmpty()) Text("No helpers found yet. Keep the app open near one.")
-                LazyColumn(Modifier.fillMaxWidth()) {
-                    items(helpers) { h ->
-                        ListItem(
-                            headlineContent = { Text(h.name) },
-                            supportingContent = { Text("signal ${h.rssi} dBm") },
-                            trailingContent = {
-                                Button({ session.connectToHelper(h) }) { Text("Ask") }
-                            }
-                        )
-                        HorizontalDivider()
+        } else {
+            when {
+                role == Role.SEEKER && state == LinkState.SCANNING -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Looking for nearby helpers…", fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (helpers.isEmpty()) Text("No helpers found yet. Keep the app open near one.")
+                    LazyColumn(Modifier.fillMaxWidth()) {
+                        items(helpers) { h ->
+                            ListItem(
+                                headlineContent = { Text(h.name) },
+                                supportingContent = {
+                                    Text(h.signalDbm?.let { "signal $it dBm" } ?: "Wi-Fi Direct")
+                                },
+                                trailingContent = {
+                                    Button({ session.connectToHelper(h) }) { Text("Ask") }
+                                }
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton({ onEnd(); session.end(); session.reset() }, Modifier.fillMaxWidth()) {
+                        Text("Cancel")
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton({ onEnd(); session.end(); session.reset() }, Modifier.fillMaxWidth()) {
-                    Text("Cancel")
+
+                role == Role.HELPER && state == LinkState.ADVERTISING ->
+                    Info("Waiting for someone nearby to connect…")
+
+                role == Role.HELPER && state == LinkState.CONSENT_PENDING -> {
+                    Info("Someone nearby is asking to borrow your signal.")
+                    Spacer(Modifier.height(12.dp))
+                    Button(session::helperApprove, Modifier.fillMaxWidth()) { Text("Approve & start") }
+                    OutlinedButton(session::helperDecline, Modifier.fillMaxWidth()) { Text("Decline") }
                 }
-            }
 
-            role == Role.HELPER && state == LinkState.ADVERTISING ->
-                Info("Waiting for someone nearby to connect…")
+                state == LinkState.CONNECTING -> Info("Connecting…")
+                state == LinkState.WAITING_APPROVAL -> Info("Waiting for the helper to approve…")
 
-            role == Role.HELPER && state == LinkState.CONSENT_PENDING -> {
-                Info("Someone nearby is asking to borrow your signal.")
-                Spacer(Modifier.height(12.dp))
-                Button(session::helperApprove, Modifier.fillMaxWidth()) { Text("Approve & start") }
-                OutlinedButton(session::helperDecline, Modifier.fillMaxWidth()) { Text("Decline") }
-            }
-
-            state == LinkState.CONNECTING -> Info("Connecting over Bluetooth…")
-            state == LinkState.WAITING_APPROVAL -> Info("Waiting for the helper to approve…")
-
-            state == LinkState.LIVE -> {
-                Text("● LIVE", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                Text("%02d:%02d".format(seconds / 60, seconds % 60), fontSize = 40.sp)
-                Text("Talking over Bluetooth radio — no data used.")
-                Spacer(Modifier.height(24.dp))
-                Button({ onEnd(); session.end() }, Modifier.fillMaxWidth()) { Text("End") }
-            }
-
-            state == LinkState.ENDED -> {
-                Info("Call ended.")
-                if (role == Role.SEEKER && seconds > 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Owed to helper: ₹%.2f".format(Settlement.amountRupees(seconds)))
-                    Button({ onPay(seconds) }, Modifier.fillMaxWidth()) { Text("Pay helper (UPI)") }
+                state == LinkState.LIVE -> {
+                    Text("● LIVE", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text("%02d:%02d".format(seconds / 60, seconds % 60), fontSize = 40.sp)
+                    Text("Talking over ${if (mode == RangeMode.WIFI) "Wi-Fi Direct" else "Bluetooth"} — no data used.")
+                    Spacer(Modifier.height(24.dp))
+                    Button({ onEnd(); session.end() }, Modifier.fillMaxWidth()) { Text("End") }
                 }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(session::reset, Modifier.fillMaxWidth()) { Text("Done") }
+
+                state == LinkState.ENDED -> {
+                    Info("Call ended.")
+                    if (role == Role.SEEKER && seconds > 0) PaySection(payee, seconds, onPay)
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(session::reset, Modifier.fillMaxWidth()) { Text("Done") }
+                }
             }
         }
     }
+
+    if (showHelperUpiDialog) {
+        HelperUpiDialog(
+            onDismiss = { showHelperUpiDialog = false },
+            onConfirm = { upi -> showHelperUpiDialog = false; onStartHelper(upi) },
+        )
+    }
+}
+
+@Composable
+private fun PaySection(payee: String?, seconds: Int, onPay: (String?, Int) -> Boolean) {
+    var manual by remember { mutableStateOf("") }
+    val known = Settlement.isValidPayee(payee)
+    Spacer(Modifier.height(8.dp))
+    Text("Owed to helper: ₹%.2f".format(Settlement.amountRupees(seconds)))
+    if (known) {
+        Text("Paying: $payee", fontSize = 12.sp)
+        Button({ onPay(payee, seconds) }, Modifier.fillMaxWidth()) { Text("Pay helper (UPI)") }
+    } else {
+        Text("The helper didn't share a UPI id. Enter it to pay:", fontSize = 12.sp)
+        OutlinedTextField(
+            value = manual, onValueChange = { manual = it },
+            label = { Text("helper UPI id (name@bank)") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { onPay(manual, seconds) },
+            enabled = Settlement.isValidPayee(manual),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Pay helper (UPI)") }
+    }
+}
+
+@Composable
+private fun HelperUpiDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
+    var upi by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Your UPI id (optional)") },
+        text = {
+            Column {
+                Text("So the person you help can pay you back. Leave blank to skip.", fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = upi, onValueChange = { upi = it },
+                    label = { Text("name@bank") }, singleLine = true,
+                )
+            }
+        },
+        confirmButton = { TextButton({ onConfirm(upi.trim().ifBlank { null }) }) { Text("Start helping") } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
